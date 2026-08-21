@@ -331,21 +331,24 @@
       await new Promise(function (r) { setTimeout(r, 0); });
       decodeAndShow(buf, file.name);
     } catch (err) {
-      hideSpinner();
       toast('Could not open file: ' + (err && err.message ? err.message : err));
+    } finally {
+      hideSpinner();
     }
   }
 
   function filesFromArrayBuffer(bytes, name) {
     if (typeof fflate === 'undefined' || !fflate.unzipSync) {
       toast('fflate failed to load from the CDN. Check your internet connection and reload.');
+      hideSpinner();
       return;
     }
     showSpinner();
     try { decodeAndShow(bytes, name); }
     catch (err) {
-      hideSpinner();
       toast('Could not open file: ' + (err && err.message ? err.message : err));
+    } finally {
+      hideSpinner();
     }
   }
 
@@ -360,7 +363,6 @@
     document.title = (name || 'comic').replace(/\.(cbz|zip)$/i, '') + ' \u2014 CBZ Viewer V3';
     hideChrome();            // start clean; hover to bring controls back
     render();
-    hideSpinner();
   }
 
   // ---------- rendering ----------
@@ -712,19 +714,32 @@
   }
   function loadFromDrive(id, name) {
     var run = window.google && google.script && google.script.run;
-    if (!run) return;
+    if (!run) { toast('Drive is not available here.'); return; }
     showSpinner();
+    var done = false;
+    var watchdog = setTimeout(function () {
+      if (done) return;
+      done = true;
+      hideSpinner();
+      toast('Drive took too long to respond (large file?). Try a smaller .cbz.');
+    }, 60000);
     run.withSuccessHandler(function (res) {
+      if (done) return;
+      done = true;
+      clearTimeout(watchdog);
       hideSpinner();
       showDrive(false);
-      if (res && res.error) { toast('Drive error: ' + res.error); return; }
+      if (!res || res.error) { toast('Drive error: ' + (res && res.error ? res.error : 'empty response')); return; }
+      // binary-safe base64 decode (handles non-Latin1 bytes)
       var bin = atob(res.base64);
       var len = bin.length;
       var bytes = new Uint8Array(len);
-      for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-      // hand the decoded archive to the same path as a dropped file
+      for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
       filesFromArrayBuffer(bytes, name || 'drive.cbz');
     }).withFailureHandler(function (e) {
+      if (done) return;
+      done = true;
+      clearTimeout(watchdog);
       hideSpinner();
       toast('Could not load from Drive: ' + (e && e.message ? e.message : e));
     }).getCbzBase64(id);

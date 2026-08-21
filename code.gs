@@ -19,8 +19,8 @@
 /** Folder ID that holds your .cbz files. Blank = search the whole Drive. */
 const CBZ_FOLDER_ID = '';
 
-/** How many bytes of a chosen .cbz to stream back (base64). 0 = whole file. */
-const MAX_BYTES = 0; // Apps Script has a ~50MB payload limit; large files may fail.
+/** Hard cap on the .cbz we send back (base64). Apps Script ~50MB payload limit. */
+const MAX_BYTES = 45 * 1024 * 1024;
 
 /**
  * Web app entry point. Serves the viewer HTML.
@@ -63,9 +63,13 @@ function listCbz() {
 function getCbzBase64(id) {
   try {
     const f = DriveApp.getFileById(id);
+    const size = f.getSize();
+    if (MAX_BYTES > 0 && size > MAX_BYTES) {
+      return { error: 'File is ' + (size / 1048576).toFixed(1) + ' MB. Apps Script cannot return files over ~' +
+               (MAX_BYTES / 1048576).toFixed(0) + ' MB. Please pick a smaller .cbz.' };
+    }
     const blob = f.getBlob();
-    const bytes = MAX_BYTES > 0 ? blob.getBytes().slice(0, MAX_BYTES) : blob.getBytes();
-    return { name: f.getName(), base64: Utilities.base64Encode(bytes) };
+    return { name: f.getName(), base64: Utilities.base64Encode(blob.getBytes()) };
   } catch (e) {
     return { error: String(e) };
   }
