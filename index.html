@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CBZ Viewer V3</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#1c2128; --panel-2:#242a32; --border:#2d333b;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --danger:#d73a49;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:#000; color:var(--text); overflow:hidden;
+    font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  }
+  /* the hidden attribute must always win over author display rules */
+  [hidden]{display:none !important}
+
+  #app{height:100vh; position:relative; background:#000}
+
+  #viewer{position:absolute; inset:0; overflow:hidden; background:#000}
+
+  /* ----- top / bottom chrome: overlays that auto-hide ----- */
+  #topBar{
+    position:absolute; top:0; left:0; right:0; z-index:30;
+    display:flex; align-items:center; gap:8px; padding:8px 12px; flex-wrap:wrap;
+    background:linear-gradient(to bottom, rgba(20,24,30,.96), rgba(20,24,30,.82));
+    border-bottom:1px solid var(--border);
+    transition:transform .22s ease, opacity .22s ease;
+  }
+  #topBar.hide{transform:translateY(-102%); opacity:0; pointer-events:none}
+  button{
+    background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; line-height:1;
+    font-family:inherit;
+  }
+  button:hover{background:#2d333b}
+  button:active{background:#3a4149}
+  button:disabled{opacity:.45; cursor:default; background:var(--panel-2)}
+  .sep{width:1px; height:22px; background:var(--border); margin:0 2px}
+  .spacer{flex:1}
+  #zoomLabel{min-width:46px; text-align:center; font-size:13px; font-variant-numeric:tabular-nums; color:var(--muted)}
+  #pageLabel{color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; padding-left:10px}
+
+  #bottomBar{
+    position:absolute; bottom:0; left:0; right:0; z-index:30;
+    padding:5px 12px; background:rgba(20,24,30,.82); border-top:1px solid var(--border);
+    color:var(--muted); font-size:12px; text-align:center; line-height:1.5;
+    transition:transform .22s ease, opacity .22s ease;
+  }
+  #bottomBar.hide{transform:translateY(102%); opacity:0; pointer-events:none}
+
+  #scrollView{position:absolute; inset:0; overflow:auto; overscroll-behavior:contain; background:#000}
+  #scrollView img{
+    display:block; margin:8px auto; max-width:none; background:#000;
+    user-select:none; -webkit-user-drag:none;
+  }
+  #scrollView.gapless img{margin:0 auto}
+
+  #spreadView{position:absolute; inset:0; overflow:auto; display:flex; overscroll-behavior:contain; background:#000}
+  .spread{margin:auto; display:flex; gap:12px; align-items:center}
+  .spread.gapless{gap:0}
+  .pg-wrap{position:relative; line-height:0}
+  .pg-wrap img{width:auto; height:100%; max-width:none; user-select:none; -webkit-user-drag:none; background:#000}
+  .pgnum{
+    position:absolute; bottom:8px; left:8px; padding:2px 8px; border-radius:5px;
+    background:rgba(0,0,0,.6); color:#fff; font-size:12px; font-variant-numeric:tabular-nums;
+    pointer-events:none; line-height:1.4;
+  }
+
+  #empty{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:14px; color:var(--muted); text-align:center; padding:24px;
+    z-index:10; background:#000;
+  }
+  #empty .big{font-size:56px; line-height:1}
+  #empty p{margin:0; font-size:14px}
+  #empty button{font-size:14px; padding:9px 16px}
+
+  #drivePanel{
+    position:absolute; inset:0; z-index:12; display:flex; align-items:center; justify-content:center;
+    background:rgba(8,10,13,.75); padding:20px;
+  }
+  .drive-card{width:min(440px, 92vw); max-height:80vh; display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .drive-head{display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); font-size:14px}
+  .drive-head button{border:none; background:transparent; font-size:20px; line-height:1; padding:0 4px; color:var(--muted)}
+  .drive-list{overflow:auto; padding:6px}
+  .drive-item{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 10px; border-radius:7px; cursor:pointer}
+  .drive-item:hover{background:var(--panel-2)}
+  .drive-item .name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .drive-item .size{color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; flex:none}
+  .drive-status{color:var(--muted); font-size:13px; padding:14px; text-align:center}
+
+  #dropOverlay{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(8,10,13,.92); border:3px dashed var(--accent); z-index:40; pointer-events:none;
+  }
+  #dropOverlay.show{display:flex}
+  #dropOverlay span{font-size:22px; color:var(--accent); font-weight:600}
+
+  #spinner{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.45); z-index:35;
+  }
+  #spinner.show{display:flex}
+  .ring{width:46px; height:46px; border:4px solid #3a4149; border-top-color:var(--accent);
+    border-radius:50%; animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  #toast{
+    position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(16px);
+    background:var(--danger); color:#fff; padding:10px 18px; border-radius:8px;
+    font-size:14px; opacity:0; pointer-events:none; transition:opacity .22s, transform .22s;
+    z-index:60; max-width:82vw;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%)}
+
+  kbd{
+    background:var(--panel-2); border:1px solid var(--border); border-bottom-width:2px;
+    border-radius:4px; padding:0 5px; font-family:inherit; font-size:11px; color:var(--text);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <main id="viewer">
+    <div id="empty">
+      <div class="big">&#128214;</div>
+      <p>Open a <b>.cbz</b> file or drag one anywhere onto this window.</p>
+      <button type="button" id="emptyOpenBtn">Choose file&hellip;</button>
+    </div>
+    <div id="scrollView" hidden></div>
+    <div id="spreadView" hidden></div>
+    <div id="drivePanel" hidden>
+      <div class="drive-card">
+        <div class="drive-head">
+          <span>Open a .cbz from Google Drive</span>
+          <button type="button" id="driveClose">&times;</button>
+        </div>
+        <div id="driveList" class="drive-list"></div>
+        <div id="driveStatus" class="drive-status">Loading&hellip;</div>
+      </div>
+    </div>
+    <div id="dropOverlay"><span>&#8681; Drop .cbz to open</span></div>
+    <div id="spinner"><div class="ring"></div></div>
+
+    <header id="topBar">
+      <button type="button" id="openBtn" title="Open a .cbz file">&#128194;&#65039; Open CBZ</button>
+      <button type="button" id="driveBtn" title="Open a .cbz from Google Drive">&#9729; Drive</button>
+      <input type="file" id="fileInput" accept=".cbz,.zip" hidden>
+      <span class="sep"></span>
+      <button type="button" id="modeBtn" title="Toggle between scroll and two-page spread">Mode: Scroll</button>
+      <button type="button" id="dirBtn" title="Reading direction for two-page mode">Direction: RTL</button>
+      <span class="sep"></span>
+      <button type="button" id="zoomOut" title="Zoom out (Ctrl+&minus;)">&#8722;</button>
+      <span id="zoomLabel">100%</span>
+      <button type="button" id="zoomIn" title="Zoom in (Ctrl++)">+</button>
+      <button type="button" id="zoomReset" title="Reset zoom to 100% (Ctrl+0)">100%</button>
+      <button type="button" id="spacingBtn" title="Toggle gutter between pages">Gaps: On</button>
+      <span class="spacer"></span>
+      <span id="pageLabel"></span>
+      <button type="button" id="fsBtn" title="Toggle fullscreen (F)">&#10530; Fullscreen</button>
+    </header>
+
+    <footer id="bottomBar"></footer>
+  </main>
+</div>
+
+<div id="toast"></div>
+<script>
+  // In a Google Apps Script Web App, `google.script.run` is provided by the host.
+  // Outside Apps Script (file://, http) we simply leave the Drive feature off.
+  window.__HAS_GAS = !!(window.google && window.google.script && window.google.script.run);
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.3/umd/index.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var LS_PREFIX = 'cbzv3.';
+  function save(k, v) { try { localStorage.setItem(LS_PREFIX + k, v); } catch (_) {} }
+  function load(k)    { try { return localStorage.getItem(LS_PREFIX + k); } catch (_) { return null; } }
+
+  var d = load('direction');
+  var m = load('mode');
+  var sp = load('spacing');
+  var sz = parseFloat(load('zoom'));
+
+  var state = {
+    pages: [],
+    loaded: false,
+    mode: m === 'spread' ? 'spread' : 'scroll',
+    direction: (d === 'ltr' || d === 'rtl') ? d : 'rtl',   // default RTL
+    zoom: !isNaN(sz) ? Math.min(3, Math.max(0.5, sz)) : 1,
+    spacing: sp === 'gapless' ? 'gapless' : 'gap',          // default gap
+    spreadIndex: 0,
+    scrollImgs: []
+  };
+
+  var ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.1;
+
+  var els = {};
+  ['app','viewer','openBtn','driveBtn','fileInput','modeBtn','dirBtn','zoomOut','zoomIn','zoomReset','zoomLabel',
+   'spacingBtn','pageLabel','fsBtn','empty','emptyOpenBtn','scrollView','spreadView','dropOverlay','spinner',
+   'drivePanel','driveClose','driveList','driveStatus','topBar','bottomBar','hintbar','toast']
+    .forEach(function (id) { els[id] = document.getElementById(id); });
+  // bottomBar doubles as the hint bar
+  els.hintbar = els.bottomBar;
+
+  var dropCounter = 0;
+
+  function hintText() {
+    if (!state.loaded) return '';
+    if (state.mode === 'spread') {
+      return 'Press <kbd>F</kbd> fullscreen &middot; ' +
+        (state.direction === 'ltr' ? '<kbd>&#8592;</kbd>/<kbd>a</kbd> prev &middot; <kbd>&#8594;</kbd>/<kbd>d</kbd> next' : '<kbd>&#8592;</kbd>/<kbd>a</kbd> next &middot; <kbd>&#8594;</kbd>/<kbd>d</kbd> prev') +
+        ' &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump &middot; <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>&minus;</kbd> zoom';
+    }
+    return 'Press <kbd>F</kbd> fullscreen &middot; mouse wheel or <kbd>&#8595;</kbd>/<kbd>PageDown</kbd>/<kbd>Space</kbd> scroll &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump &middot; <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>&minus;</kbd> zoom';
+  }
+  function updateHint() {
+    els.hintbar.innerHTML = hintText() ||
+      'Open a .cbz to begin &middot; drag &amp; drop supported &middot; move the cursor to the top to show controls';
+  }
+
+  function toast(msg, ms) {
+    els.toast.textContent = msg;
+    els.toast.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { els.toast.classList.remove('show'); }, ms || 3200);
+  }
+
+  function showSpinner() { els.spinner.classList.add('show'); }
+  function hideSpinner() { els.spinner.classList.remove('show'); }
+
+  // ---------- chrome auto-hide ----------
+  var chromeTimer = null;
+  function showChrome() {
+    clearTimeout(chromeTimer);
+    els.topBar.classList.remove('hide');
+    els.bottomBar.classList.remove('hide');
+  }
+  function hideChrome() {
+    els.topBar.classList.add('hide');
+    els.bottomBar.classList.add('hide');
+  }
+  function scheduleHideChrome() {
+    clearTimeout(chromeTimer);
+    chromeTimer = setTimeout(function () { if (state.loaded) hideChrome(); }, 900);
+  }
+  document.addEventListener('mousemove', function (e) {
+    if (!state.loaded) { showChrome(); return; }
+    if (e.clientY <= 90) { showChrome(); }
+    else if (e.clientY > 120) { scheduleHideChrome(); }
+  }, { passive: true });
+  document.addEventListener('mouseleave', function () { if (state.loaded) hideChrome(); });
+
+  // ---------- file loading ----------
+  var IMG_RE = /\.(?:png|jpe?g|jpeg|gif|webp|bmp|avif)$/i;
+
+  function normalizeName(n) { return n.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '').toLowerCase(); }
+  function baseName(n) { var p = n.split('/'); return p[p.length - 1]; }
+  function mimeFor(name) {
+    if (/\.png$/i.test(name)) return 'image/png';
+    if (/\.jpe?g$/i.test(name)) return 'image/jpeg';
+    if (/\.gif$/i.test(name)) return 'image/gif';
+    if (/\.webp$/i.test(name)) return 'image/webp';
+    if (/\.avif$/i.test(name)) return 'image/avif';
+    return 'image/bmp';
+  }
+
+  function orderPages(files) {
+    var entries = Object.keys(files).map(function (n) { return [n, files[n]]; });
+    var comic = entries.filter(function (e) { return normalizeName(e[0]).endsWith('comicinfo.xml'); })[0];
+    var imgs = entries.filter(function (e) { return IMG_RE.test(e[0]); });
+    var ordered = [], used = {};
+
+    if (comic) {
+      try {
+        var doc = new DOMParser().parseFromString(new TextDecoder().decode(comic[1]), 'application/xml');
+        var pageNodes = doc.querySelectorAll('Pages Page');
+        for (var i = 0; i < pageNodes.length; i++) {
+          var img = (pageNodes[i].getAttribute('Image') || '').trim();
+          if (!img) continue;
+          var pn = normalizeName(img);
+          var pb = normalizeName(baseName(img));
+          var match = null;
+          for (var j = 0; j < imgs.length; j++) {
+            var name = imgs[j][0];
+            if (used[name]) continue;
+            var nn = normalizeName(name), nb = normalizeName(baseName(name));
+            if (nn === pn || nb === pn || nb === pb || nn.endsWith('/' + pn)) { match = imgs[j]; break; }
+          }
+          if (match) { ordered.push(match); used[match[0]] = true; }
+        }
+      } catch (_) {}
+    }
+
+    var rest = imgs.filter(function (e) { return !used[e[0]]; })
+      .sort(function (a, b) { return a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }); });
+
+    return ordered.concat(rest).map(function (e) {
+      return { name: e[0], url: URL.createObjectURL(new Blob([e[1]], { type: mimeFor(e[0]) })) };
+    });
+  }
+
+  function clearLoaded() {
+    state.pages.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (_) {} });
+    state.pages = [];
+    state.scrollImgs = [];
+    state.loaded = false;
+    state.spreadIndex = 0;
+    els.scrollView.innerHTML = '';
+    els.spreadView.innerHTML = '';
+  }
+
+  async function loadCbz(file) {
+    if (!file) return;
+    if (!/\.(cbz|zip)$/i.test(file.name)) { toast('That is not a .cbz file'); return; }
+    if (typeof fflate === 'undefined' || !fflate.unzipSync) {
+      toast('fflate failed to load from the CDN. Check your internet connection and reload.');
+      return;
+    }
+    showSpinner();
+    try {
+      await new Promise(function (r) { setTimeout(r, 30); });
+      var buf = new Uint8Array(await file.arrayBuffer());
+      await new Promise(function (r) { setTimeout(r, 0); });
+      decodeAndShow(buf, file.name);
+    } catch (err) {
+      hideSpinner();
+      toast('Could not open file: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  function filesFromArrayBuffer(bytes, name) {
+    if (typeof fflate === 'undefined' || !fflate.unzipSync) {
+      toast('fflate failed to load from the CDN. Check your internet connection and reload.');
+      return;
+    }
+    showSpinner();
+    try { decodeAndShow(bytes, name); }
+    catch (err) {
+      hideSpinner();
+      toast('Could not open file: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  function decodeAndShow(buf, name) {
+    var files = fflate.unzipSync(buf);
+    var pages = orderPages(files);
+    if (!pages.length) throw new Error('No images found in this archive');
+    clearLoaded();
+    state.pages = pages;
+    state.loaded = true;
+    state.spreadIndex = 0;
+    document.title = (name || 'comic').replace(/\.(cbz|zip)$/i, '') + ' \u2014 CBZ Viewer V3';
+    hideChrome();            // start clean; hover to bring controls back
+    render();
+    hideSpinner();
+  }
+
+  // ---------- rendering ----------
+  function buildSpreads() {
+    var spreads = [];
+    if (!state.pages.length) return spreads;
+    spreads.push([state.pages[0]]);
+    for (var i = 1; i < state.pages.length; i += 2) spreads.push(state.pages.slice(i, i + 2));
+    return spreads;
+  }
+
+  function makeImg(page) {
+    var img = document.createElement('img');
+    img.src = page.url;
+    img.alt = page.name;
+    img.draggable = false;
+    img.decoding = 'async';
+    return img;
+  }
+
+  function render() {
+    if (!state.loaded) {
+      els.empty.hidden = false;
+      els.scrollView.hidden = true;
+      els.spreadView.hidden = true;
+      els.pageLabel.textContent = '';
+      showChrome();
+      updateToolbar();
+      updateHint();
+      return;
+    }
+    els.empty.hidden = true;
+    if (state.mode === 'scroll') renderScroll();
+    else renderSpread();
+    updateToolbar();
+    updateHint();
+  }
+
+  function renderScroll() {
+    els.scrollView.hidden = false;
+    els.spreadView.hidden = true;
+    els.spreadView.innerHTML = '';
+    els.scrollView.className = state.spacing === 'gapless' ? 'gapless' : '';
+    var frag = document.createDocumentFragment();
+    state.scrollImgs = [];
+    state.pages.forEach(function (p) {
+      var img = makeImg(p);
+      img.loading = 'lazy';
+      state.scrollImgs.push(img);
+      frag.appendChild(img);
+    });
+    els.scrollView.innerHTML = '';
+    els.scrollView.appendChild(frag);
+    els.scrollView.scrollTop = 0;
+    applyScrollWidths();
+  }
+
+  function applyScrollWidths() {
+    var w = Math.round(els.scrollView.clientWidth * state.zoom);
+    if (w < 80) return;
+    state.scrollImgs.forEach(function (img) { img.style.width = w + 'px'; });
+  }
+
+  function renderSpread() {
+    els.scrollView.hidden = true;
+    els.spreadView.hidden = false;
+    var spreads = buildSpreads();
+    if (state.spreadIndex >= spreads.length) state.spreadIndex = spreads.length - 1;
+    if (state.spreadIndex < 0) state.spreadIndex = 0;
+    var spread = spreads[state.spreadIndex];
+
+    els.spreadView.innerHTML = '';
+    var holder = document.createElement('div');
+    holder.className = 'spread' + (state.spacing === 'gapless' ? ' gapless' : '');
+    holder.dir = state.direction === 'rtl' ? 'rtl' : 'ltr';
+
+    spread.forEach(function (page, i) {
+      var wrap = document.createElement('div');
+      wrap.className = 'pg-wrap';
+      var img = makeImg(page);
+      img.style.height = Math.round(els.spreadView.clientHeight * state.zoom) + 'px';
+      wrap.appendChild(img);
+      var num = document.createElement('span');
+      num.className = 'pgnum';
+      num.textContent = '' + (state.pages.indexOf(page) + 1);
+      wrap.appendChild(num);
+      holder.appendChild(wrap);
+      if (i === 0 && spread.length < 2 && spreads[state.spreadIndex + 1]) {
+        spreads[state.spreadIndex + 1].forEach(function (p) { var t = new Image(); t.src = p.url; });
+      }
+    });
+
+    els.spreadView.appendChild(holder);
+    updateSpreadLabel(spread);
+  }
+
+  function updateSpreadLabel(spread) {
+    if (!spread) { els.pageLabel.textContent = ''; return; }
+    var start = state.pages.indexOf(spread[0]) + 1;
+    var end = start + spread.length - 1;
+    els.pageLabel.textContent = (spread.length > 1 ? 'Pages ' + start + '\u2013' + end : 'Page ' + start) + ' of ' + state.pages.length;
+  }
+
+  function currentScrollPage() {
+    if (!state.scrollImgs.length) return null;
+    var mid = els.scrollView.clientHeight / 2;
+    var vTop = els.scrollView.getBoundingClientRect().top;
+    var current = state.scrollImgs[0];
+    state.scrollImgs.forEach(function (img) {
+      if (img.getBoundingClientRect().top - vTop <= mid) current = img;
+    });
+    return state.scrollImgs.indexOf(current) + 1;
+  }
+
+  var scrollLabelTick = false;
+  function updateScrollLabel() {
+    if (scrollLabelTick) return;
+    scrollLabelTick = true;
+    requestAnimationFrame(function () {
+      scrollLabelTick = false;
+      if (!state.loaded || state.mode !== 'scroll') return;
+      var p = currentScrollPage();
+      if (p) els.pageLabel.textContent = 'Page ' + p + ' of ' + state.pages.length;
+    });
+  }
+
+  // ---------- navigation ----------
+  function nextSpread() {
+    var spreads = buildSpreads();
+    if (state.spreadIndex < spreads.length - 1) { state.spreadIndex++; renderSpread(); }
+  }
+  function prevSpread() {
+    if (state.spreadIndex > 0) { state.spreadIndex--; renderSpread(); }
+  }
+  function jumpToSpread(i) {
+    var spreads = buildSpreads();
+    state.spreadIndex = Math.max(0, Math.min(spreads.length - 1, i));
+    renderSpread();
+  }
+
+  // ---------- zoom ----------
+  function setZoom(z) {
+    state.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+    save('zoom', String(state.zoom));
+    els.zoomLabel.textContent = Math.round(state.zoom * 100) + '%';
+    if (state.mode === 'scroll') applyScrollWidths();
+    else renderSpread();
+  }
+  function zoomBy(d) { setZoom(state.zoom + d); }
+
+  // ---------- mode / direction / spacing ----------
+  function setMode(m) {
+    state.mode = m;
+    save('mode', m);
+    if (!state.loaded) { updateToolbar(); updateHint(); return; }
+    render();
+  }
+  function toggleMode() {
+    if (state.loaded && state.mode === 'scroll' && state.pages.length > 1) state.spreadIndex = 0;
+    setMode(state.mode === 'scroll' ? 'spread' : 'scroll');
+  }
+  function setDirection(d) {
+    state.direction = d;
+    save('direction', d);
+    if (state.loaded && state.mode === 'spread') renderSpread();
+    updateToolbar();
+    updateHint();
+  }
+  function toggleDirection() { setDirection(state.direction === 'ltr' ? 'rtl' : 'ltr'); }
+  function toggleSpacing() {
+    state.spacing = state.spacing === 'gap' ? 'gapless' : 'gap';
+    save('spacing', state.spacing);
+    if (state.loaded) render();
+    updateToolbar();
+  }
+
+  // ---------- fullscreen ----------
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+    } else if (els.app.requestFullscreen) {
+      els.app.requestFullscreen();
+    } else if (els.app.webkitRequestFullscreen) {
+      els.app.webkitRequestFullscreen();
+    } else {
+      toast('Fullscreen is not supported in this browser');
+    }
+  }
+
+  function updateToolbar() {
+    window.__HAS_GAS = !!(window.google && window.google.script && window.google.script.run);
+    els.modeBtn.textContent = (state.loaded && state.pages.length > 1) ? 'Mode: ' + (state.mode === 'scroll' ? 'Scroll' : '2-Page') : 'Mode: Scroll';
+    els.modeBtn.disabled = !state.loaded || state.pages.length < 2;
+    els.dirBtn.textContent = 'Direction: ' + (state.direction === 'ltr' ? 'LTR' : 'RTL');
+    els.dirBtn.disabled = !state.loaded || state.mode !== 'spread' || state.pages.length < 2;
+    els.driveBtn.disabled = !window.__HAS_GAS;
+    els.spacingBtn.textContent = 'Gaps: ' + (state.spacing === 'gapless' ? 'Off' : 'On');
+    els.zoomLabel.textContent = Math.round(state.zoom * 100) + '%';
+    els.fsBtn.textContent = document.fullscreenElement ? '\u2756 Exit Fullscreen' : '\u2970 Fullscreen';
+  }
+
+  document.addEventListener('fullscreenchange', updateToolbar);
+  document.addEventListener('webkitfullscreenchange', updateToolbar);
+
+  // ---------- keyboard ----------
+  function isTyping(e) {
+    var t = e.target;
+    return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+  }
+  function scrollViewBy(dy) {
+    var sv = els.scrollView;
+    if (dy > 0) { if (sv.scrollTop + sv.clientHeight >= sv.scrollHeight - 2) return false; }
+    else if (sv.scrollTop <= 0) return false;
+    sv.scrollBy(0, dy);
+    return true;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (isTyping(e)) return;
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); return; }
+    if (e.ctrlKey) {
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(ZOOM_STEP); return; }
+      if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(-ZOOM_STEP); return; }
+      if (e.key === '0') { e.preventDefault(); setZoom(1); return; }
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!state.loaded) return;
+
+    if (state.mode === 'spread') {
+      var fwd = state.direction === 'ltr' ? ['ArrowRight', 'd', 'D'] : ['ArrowLeft', 'a', 'A'];
+      var back = state.direction === 'ltr' ? ['ArrowLeft', 'a', 'A'] : ['ArrowRight', 'd', 'D'];
+      if (fwd.indexOf(e.key) !== -1) { e.preventDefault(); nextSpread(); return; }
+      if (back.indexOf(e.key) !== -1) { e.preventDefault(); prevSpread(); return; }
+      if (e.key === 'Home') { e.preventDefault(); jumpToSpread(0); return; }
+      if (e.key === 'End') { e.preventDefault(); jumpToSpread(1e9); return; }
+    } else {
+      var step = Math.round(els.scrollView.clientHeight * 0.8);
+      if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); scrollViewBy(step); return; }
+      if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); scrollViewBy(-step); return; }
+      if (e.key === 'Home') { e.preventDefault(); els.scrollView.scrollTop = 0; return; }
+      if (e.key === 'End') { e.preventDefault(); els.scrollView.scrollTop = els.scrollView.scrollHeight; return; }
+    }
+  });
+
+  // wheel: scroll mode scrolls natively; spread mode navigates by spread
+  els.viewer.addEventListener('wheel', function (e) {
+    if (e.ctrlKey) { e.preventDefault(); zoomBy(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP); return; }
+    if (!state.loaded) return;
+    if (state.mode === 'scroll') return;           // let the view scroll natively
+    if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+      e.preventDefault();
+      if (e.deltaY > 0) nextSpread(); else prevSpread();
+    }
+  }, { passive: false });
+
+  // ---------- drag & drop ----------
+  function dragOverlay(show) { els.dropOverlay.classList.toggle('show', show); }
+  document.addEventListener('dragenter', function (e) {
+    e.preventDefault();
+    if (e.dataTransfer && Array.prototype.some.call(e.dataTransfer.types, function (t) { return t === 'Files'; })) {
+      dropCounter++; dragOverlay(true);
+    }
+  });
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    if (--dropCounter <= 0) { dropCounter = 0; dragOverlay(false); }
+  });
+  document.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dropCounter = 0; dragOverlay(false);
+    var files = e.dataTransfer ? e.dataTransfer.files : null;
+    if (!files || !files.length) return;
+    var cbz = Array.prototype.filter.call(files, function (f) { return /\.(cbz|zip)$/i.test(f.name); })[0];
+    if (cbz) loadCbz(cbz); else toast('No .cbz file in that drop');
+  });
+
+  // ---------- resize ----------
+  var resizeTick = false;
+  window.addEventListener('resize', function () {
+    if (resizeTick) return;
+    resizeTick = true;
+    requestAnimationFrame(function () {
+      resizeTick = false;
+      if (!state.loaded) return;
+      if (state.mode === 'scroll') applyScrollWidths();
+      else renderSpread();
+    });
+  });
+
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(function () {
+      if (state.loaded && state.mode === 'scroll') applyScrollWidths();
+    }).observe(els.scrollView);
+  }
+
+  els.scrollView.addEventListener('scroll', updateScrollLabel, { passive: true });
+  // keep pinned to bottom when lazy-loaded images below the viewport expand the page
+  els.scrollView.addEventListener('load', function (e) {
+    if (e.target && e.target.tagName === 'IMG' && state.mode === 'scroll') {
+      var sv = els.scrollView;
+      if (sv.scrollTop + sv.clientHeight >= sv.scrollHeight - 8) sv.scrollTop = sv.scrollHeight;
+    }
+  }, true);
+
+  // ---------- wiring ----------
+  function openDialog(e) { if (e) e.preventDefault(); els.fileInput.click(); }
+  els.openBtn.addEventListener('click', openDialog);
+  els.emptyOpenBtn.addEventListener('click', openDialog);
+  els.fileInput.addEventListener('change', function () {
+    if (els.fileInput.files && els.fileInput.files.length) loadCbz(els.fileInput.files[0]);
+    els.fileInput.value = '';
+  });
+  els.modeBtn.addEventListener('click', toggleMode);
+  els.dirBtn.addEventListener('click', toggleDirection);
+  els.spacingBtn.addEventListener('click', toggleSpacing);
+  els.zoomOut.addEventListener('click', function () { zoomBy(-ZOOM_STEP); });
+  els.zoomIn.addEventListener('click', function () { zoomBy(ZOOM_STEP); });
+  els.zoomReset.addEventListener('click', function () { setZoom(1); });
+  els.fsBtn.addEventListener('click', toggleFullscreen);
+
+  // ---------- Google Drive (Google Apps Script Web App) ----------
+  function showDrive(show) { els.drivePanel.hidden = !show; }
+  function openDrivePanel() {
+    showDrive(true);
+    refreshDriveList();
+  }
+  function refreshDriveList() {
+    var run = window.google && google.script && google.script.run;
+    if (!run) { els.driveStatus.textContent = 'Not running inside Google Apps Script.'; return; }
+    els.driveStatus.textContent = 'Loading…';
+    els.driveList.innerHTML = '';
+    run.withSuccessHandler(function (res) {
+      if (res && res.error) { els.driveStatus.textContent = 'Drive error: ' + res.error; return; }
+      if (!res || !res.files || !res.files.length) { els.driveStatus.textContent = 'No .cbz files found.'; return; }
+      els.driveStatus.textContent = '';
+      res.files.forEach(function (f) {
+        var row = document.createElement('div');
+        row.className = 'drive-item';
+        var name = document.createElement('span'); name.className = 'name'; name.textContent = f.name;
+        var size = document.createElement('span'); size.className = 'size'; size.textContent = (f.size / 1048576).toFixed(2) + ' MB';
+        row.appendChild(name); row.appendChild(size);
+        row.addEventListener('click', function () { loadFromDrive(f.id, f.name); });
+        els.driveList.appendChild(row);
+      });
+    }).withFailureHandler(function (e) {
+      els.driveStatus.textContent = 'Could not reach Drive: ' + (e && e.message ? e.message : e);
+    }).listCbz();
+  }
+  function loadFromDrive(id, name) {
+    var run = window.google && google.script && google.script.run;
+    if (!run) return;
+    showSpinner();
+    run.withSuccessHandler(function (res) {
+      hideSpinner();
+      showDrive(false);
+      if (res && res.error) { toast('Drive error: ' + res.error); return; }
+      var bin = atob(res.base64);
+      var len = bin.length;
+      var bytes = new Uint8Array(len);
+      for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+      // hand the decoded archive to the same path as a dropped file
+      filesFromArrayBuffer(bytes, name || 'drive.cbz');
+    }).withFailureHandler(function (e) {
+      hideSpinner();
+      toast('Could not load from Drive: ' + (e && e.message ? e.message : e));
+    }).getCbzBase64(id);
+  }
+
+  els.driveBtn.addEventListener('click', openDrivePanel);
+  els.driveClose.addEventListener('click', function () { showDrive(false); });
+
+  window.__cbzViewer = { state: state, reload: render };
+
+  render();
+})();
+</script>
+</body>
+</html>
