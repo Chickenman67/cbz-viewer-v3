@@ -197,7 +197,8 @@
     zoom: !isNaN(sz) ? Math.min(3, Math.max(0.5, sz)) : 1,
     spacing: sp === 'gapless' ? 'gapless' : 'gap',          // default gap
     spreadIndex: 0,
-    scrollImgs: []
+    scrollImgs: [],
+    currentFileName: null
   };
 
   var ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.1;
@@ -307,12 +308,36 @@
     });
   }
 
+  function savePagePosition() {
+    if (!state.loaded || !state.currentFileName) return;
+    var pageNum = 1;
+    if (state.mode === 'spread') {
+      var spreads = buildSpreads();
+      if (spreads[state.spreadIndex] && spreads[state.spreadIndex][0]) {
+        pageNum = state.pages.indexOf(spreads[state.spreadIndex][0]) + 1;
+      }
+    } else {
+      pageNum = currentScrollPage() || 1;
+    }
+    save('page.' + state.currentFileName, String(pageNum));
+  }
+
+  function loadPagePosition() {
+    if (!state.currentFileName) return;
+    var saved = load('page.' + state.currentFileName);
+    if (!saved) return;
+    var pageNum = parseInt(saved, 10);
+    if (isNaN(pageNum) || pageNum < 1) return;
+    return Math.min(pageNum, state.pages.length);
+  }
+
   function clearLoaded() {
     state.pages.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (_) {} });
     state.pages = [];
     state.scrollImgs = [];
     state.loaded = false;
     state.spreadIndex = 0;
+    state.currentFileName = null;
     els.scrollView.innerHTML = '';
     els.spreadView.innerHTML = '';
   }
@@ -359,10 +384,31 @@
     clearLoaded();
     state.pages = pages;
     state.loaded = true;
+    state.currentFileName = name || 'comic';
     state.spreadIndex = 0;
+    var savedPage = loadPagePosition();
+    if (savedPage) {
+      if (state.mode === 'spread') {
+        var spreads = buildSpreads();
+        for (var i = 0; i < spreads.length; i++) {
+          if (spreads[i][0] && state.pages.indexOf(spreads[i][0]) + 1 >= savedPage) {
+            state.spreadIndex = i;
+            break;
+          }
+        }
+      }
+    }
     document.title = (name || 'comic').replace(/\.(cbz|zip)$/i, '') + ' \u2014 CBZ Viewer V3';
-    hideChrome();            // start clean; hover to bring controls back
+    hideChrome();
     render();
+    if (savedPage && state.mode === 'scroll') {
+      setTimeout(function () {
+        var targetImg = state.scrollImgs[savedPage - 1];
+        if (targetImg) {
+          targetImg.scrollIntoView({ block: 'start', behavior: 'instant' });
+        }
+      }, 100);
+    }
   }
 
   // ---------- rendering ----------
@@ -486,21 +532,23 @@
       if (!state.loaded || state.mode !== 'scroll') return;
       var p = currentScrollPage();
       if (p) els.pageLabel.textContent = 'Page ' + p + ' of ' + state.pages.length;
+      savePagePosition();
     });
   }
 
   // ---------- navigation ----------
   function nextSpread() {
     var spreads = buildSpreads();
-    if (state.spreadIndex < spreads.length - 1) { state.spreadIndex++; renderSpread(); }
+    if (state.spreadIndex < spreads.length - 1) { state.spreadIndex++; renderSpread(); savePagePosition(); }
   }
   function prevSpread() {
-    if (state.spreadIndex > 0) { state.spreadIndex--; renderSpread(); }
+    if (state.spreadIndex > 0) { state.spreadIndex--; renderSpread(); savePagePosition(); }
   }
   function jumpToSpread(i) {
     var spreads = buildSpreads();
     state.spreadIndex = Math.max(0, Math.min(spreads.length - 1, i));
     renderSpread();
+    savePagePosition();
   }
 
   // ---------- zoom ----------
@@ -515,10 +563,31 @@
 
   // ---------- mode / direction / spacing ----------
   function setMode(m) {
+    savePagePosition();
     state.mode = m;
     save('mode', m);
     if (!state.loaded) { updateToolbar(); updateHint(); return; }
+    var savedPage = loadPagePosition();
+    if (savedPage) {
+      if (m === 'spread') {
+        var spreads = buildSpreads();
+        for (var i = 0; i < spreads.length; i++) {
+          if (spreads[i][0] && state.pages.indexOf(spreads[i][0]) + 1 >= savedPage) {
+            state.spreadIndex = i;
+            break;
+          }
+        }
+      }
+    }
     render();
+    if (savedPage && m === 'scroll') {
+      setTimeout(function () {
+        var targetImg = state.scrollImgs[savedPage - 1];
+        if (targetImg) {
+          targetImg.scrollIntoView({ block: 'start', behavior: 'instant' });
+        }
+      }, 100);
+    }
   }
   function toggleMode() {
     if (state.loaded && state.mode === 'scroll' && state.pages.length > 1) state.spreadIndex = 0;
