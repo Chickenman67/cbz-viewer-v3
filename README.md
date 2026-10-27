@@ -29,6 +29,7 @@ from jsDelivr) for in-browser unzipping. No build step, no backend required
   navigate spreads; `Home`/`End` jump; `F` toggles fullscreen.
 - **Zoom** — toolbar buttons only; persisted. `Ctrl`/`Cmd`+`+`/`-`/`0` and
   `Ctrl`/`Cmd`+wheel are left to the browser and do **not** change comic zoom.
+  In scroll mode, zooming keeps the page you are reading centred in view.
 - **Fullscreen** — covers the whole viewport; the toolbar/controls auto-hide and
   reappear when you move the cursor to the top.
 - **ComicInfo.xml** — if the archive contains one, page order follows its

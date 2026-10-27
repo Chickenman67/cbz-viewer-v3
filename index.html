@@ -472,6 +472,39 @@
     state.scrollImgs.forEach(function (img) { img.style.width = w + 'px'; });
   }
 
+  // Keep the page at the viewport centre fixed when the comic zoom changes.
+  function captureScrollAnchor() {
+    var sv = els.scrollView;
+    if (!state.scrollImgs.length || sv.scrollTop <= 0) return null;  // stay at the top
+    var viewTop = sv.getBoundingClientRect().top;
+    var centre = viewTop + sv.clientHeight / 2;
+    var best = null;
+    for (var i = 0; i < state.scrollImgs.length; i++) {
+      var r = state.scrollImgs[i].getBoundingClientRect();
+      if (r.height <= 0) continue;
+      if (r.top > centre) break;
+      best = { index: i, offset: (centre - r.top) / r.height };
+    }
+    if (best) return best;
+    var max = sv.scrollHeight - sv.clientHeight;
+    return { ratio: max > 0 ? sv.scrollTop / max : 0 };
+  }
+
+  function restoreScrollAnchor(anchor) {
+    var sv = els.scrollView;
+    if (!anchor) { sv.scrollTop = 0; return; }
+    if (anchor.ratio != null) {
+      sv.scrollTop = (sv.scrollHeight - sv.clientHeight) * anchor.ratio;
+      return;
+    }
+    var img = state.scrollImgs[anchor.index];
+    if (!img) return;
+    var r = img.getBoundingClientRect();
+    if (r.height <= 0) return;
+    var contentTop = r.top - sv.getBoundingClientRect().top + sv.scrollTop;
+    sv.scrollTop = contentTop + r.height * anchor.offset - sv.clientHeight / 2;
+  }
+
   function renderSpread() {
     els.scrollView.hidden = true;
     els.spreadView.hidden = false;
@@ -556,8 +589,13 @@
     state.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
     save('zoom', String(state.zoom));
     els.zoomLabel.textContent = Math.round(state.zoom * 100) + '%';
-    if (state.mode === 'scroll') applyScrollWidths();
-    else renderSpread();
+    if (state.mode === 'scroll') {
+      var anchor = captureScrollAnchor();
+      applyScrollWidths();
+      restoreScrollAnchor(anchor);
+    } else {
+      renderSpread();
+    }
   }
   function zoomBy(d) { setZoom(state.zoom + d); }
 
