@@ -332,6 +332,7 @@
   }
 
   function clearLoaded() {
+    clearBrowserZoomAnchor();
     state.pages.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (_) {} });
     state.pages = [];
     state.scrollImgs = [];
@@ -505,6 +506,27 @@
     sv.scrollTop = contentTop + r.height * anchor.offset - sv.clientHeight / 2;
   }
 
+  // Browser/OS zoom (Ctrl/Cmd+wheel or +/-/0) reflows the page before we hear
+  // about it. Remember where the reader was so the resize handler can restore it.
+  var pendingBrowserZoomAnchor = null;
+  var pendingBrowserZoomTimer = null;
+  function clearBrowserZoomAnchor() {
+    if (pendingBrowserZoomTimer) clearTimeout(pendingBrowserZoomTimer);
+    pendingBrowserZoomAnchor = null;
+    pendingBrowserZoomTimer = null;
+  }
+  function armBrowserZoomAnchor() {
+    if (!state.loaded || state.mode !== 'scroll' || pendingBrowserZoomTimer) return;
+    pendingBrowserZoomAnchor = captureScrollAnchor();
+    pendingBrowserZoomTimer = setTimeout(clearBrowserZoomAnchor, 1500);
+  }
+  function takeBrowserZoomAnchor() {
+    if (!pendingBrowserZoomTimer) return undefined;
+    var anchor = pendingBrowserZoomAnchor;
+    clearBrowserZoomAnchor();
+    return anchor;
+  }
+
   function renderSpread() {
     els.scrollView.hidden = true;
     els.spreadView.hidden = false;
@@ -602,6 +624,7 @@
   // ---------- mode / direction / spacing ----------
   function setMode(m) {
     savePagePosition();
+    clearBrowserZoomAnchor();
     state.mode = m;
     save('mode', m);
     if (!state.loaded) { updateToolbar(); updateHint(); return; }
@@ -690,7 +713,11 @@
   document.addEventListener('keydown', function (e) {
     if (isTyping(e)) return;
     // Leave browser/OS shortcuts (Ctrl/Cmd+wheel, Ctrl/Cmd +/-/0/F) to the browser.
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '0') armBrowserZoomAnchor();
+      return;
+    }
+    if (e.altKey) return;
     if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); return; }
     if (!state.loaded) return;
 
@@ -713,7 +740,7 @@
   // wheel: scroll mode scrolls natively; spread mode navigates by spread
   els.viewer.addEventListener('wheel', function (e) {
     // Ctrl/Cmd+wheel is browser/OS zoom — never intercept it.
-    if (e.ctrlKey || e.metaKey) return;
+    if (e.ctrlKey || e.metaKey) { armBrowserZoomAnchor(); return; }
     if (!state.loaded) return;
     if (state.mode === 'scroll') return;           // let the view scroll natively
     if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
@@ -752,8 +779,13 @@
     requestAnimationFrame(function () {
       resizeTick = false;
       if (!state.loaded) return;
-      if (state.mode === 'scroll') applyScrollWidths();
-      else renderSpread();
+      if (state.mode === 'scroll') {
+        var browserZoomAnchor = takeBrowserZoomAnchor();
+        applyScrollWidths();
+        if (browserZoomAnchor !== undefined) restoreScrollAnchor(browserZoomAnchor);
+      } else {
+        renderSpread();
+      }
     });
   });
 
