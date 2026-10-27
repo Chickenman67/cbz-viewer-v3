@@ -154,10 +154,10 @@
       <button type="button" id="modeBtn" title="Toggle between scroll and two-page spread">Mode: Scroll</button>
       <button type="button" id="dirBtn" title="Reading direction for two-page mode">Direction: RTL</button>
       <span class="sep"></span>
-      <button type="button" id="zoomOut" title="Zoom comic out">&minus;</button>
+      <button type="button" id="zoomOut" title="Zoom comic out (Ctrl+&minus; / Ctrl+wheel)">&minus;</button>
       <span id="zoomLabel">100%</span>
-      <button type="button" id="zoomIn" title="Zoom comic in">+</button>
-      <button type="button" id="zoomReset" title="Reset comic zoom to 100%">100%</button>
+      <button type="button" id="zoomIn" title="Zoom comic in (Ctrl++ / Ctrl+wheel)">+</button>
+      <button type="button" id="zoomReset" title="Reset comic zoom to 100% (Ctrl+0)">100%</button>
       <button type="button" id="spacingBtn" title="Toggle gutter between pages">Gaps: On</button>
       <span class="spacer"></span>
       <span id="pageLabel"></span>
@@ -218,9 +218,9 @@
     if (state.mode === 'spread') {
       return 'Press <kbd>F</kbd> fullscreen &middot; ' +
         (state.direction === 'ltr' ? '<kbd>&#8592;</kbd>/<kbd>a</kbd> prev &middot; <kbd>&#8594;</kbd>/<kbd>d</kbd> next' : '<kbd>&#8592;</kbd>/<kbd>a</kbd> next &middot; <kbd>&#8594;</kbd>/<kbd>d</kbd> prev') +
-        ' &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump';
+        ' &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump &middot; <kbd>Ctrl</kbd>+wheel zoom';
     }
-    return 'Press <kbd>F</kbd> fullscreen &middot; mouse wheel or <kbd>&#8595;</kbd>/<kbd>PageDown</kbd>/<kbd>Space</kbd> scroll &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump';
+    return 'Press <kbd>F</kbd> fullscreen &middot; mouse wheel or <kbd>&#8595;</kbd>/<kbd>PageDown</kbd>/<kbd>Space</kbd> scroll &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump &middot; <kbd>Ctrl</kbd>+wheel zoom';
   }
   function updateHint() {
     els.hintbar.innerHTML = hintText() ||
@@ -332,7 +332,6 @@
   }
 
   function clearLoaded() {
-    clearBrowserZoomAnchor();
     state.pages.forEach(function (p) { try { URL.revokeObjectURL(p.url); } catch (_) {} });
     state.pages = [];
     state.scrollImgs = [];
@@ -473,7 +472,7 @@
     state.scrollImgs.forEach(function (img) { img.style.width = w + 'px'; });
   }
 
-  // Keep the page at the viewport centre fixed when the comic zoom changes.
+  // Keep the page at the viewport centre fixed across zoom and reflow.
   function captureScrollAnchor() {
     var sv = els.scrollView;
     if (!state.scrollImgs.length || sv.scrollTop <= 0) return null;  // stay at the top
@@ -504,27 +503,6 @@
     if (r.height <= 0) return;
     var contentTop = r.top - sv.getBoundingClientRect().top + sv.scrollTop;
     sv.scrollTop = contentTop + r.height * anchor.offset - sv.clientHeight / 2;
-  }
-
-  // Browser/OS zoom (Ctrl/Cmd+wheel or +/-/0) reflows the page before we hear
-  // about it. Remember where the reader was so the resize handler can restore it.
-  var pendingBrowserZoomAnchor = null;
-  var pendingBrowserZoomTimer = null;
-  function clearBrowserZoomAnchor() {
-    if (pendingBrowserZoomTimer) clearTimeout(pendingBrowserZoomTimer);
-    pendingBrowserZoomAnchor = null;
-    pendingBrowserZoomTimer = null;
-  }
-  function armBrowserZoomAnchor() {
-    if (!state.loaded || state.mode !== 'scroll' || pendingBrowserZoomTimer) return;
-    pendingBrowserZoomAnchor = captureScrollAnchor();
-    pendingBrowserZoomTimer = setTimeout(clearBrowserZoomAnchor, 1500);
-  }
-  function takeBrowserZoomAnchor() {
-    if (!pendingBrowserZoomTimer) return undefined;
-    var anchor = pendingBrowserZoomAnchor;
-    clearBrowserZoomAnchor();
-    return anchor;
   }
 
   function renderSpread() {
@@ -624,7 +602,6 @@
   // ---------- mode / direction / spacing ----------
   function setMode(m) {
     savePagePosition();
-    clearBrowserZoomAnchor();
     state.mode = m;
     save('mode', m);
     if (!state.loaded) { updateToolbar(); updateHint(); return; }
@@ -712,9 +689,12 @@
 
   document.addEventListener('keydown', function (e) {
     if (isTyping(e)) return;
-    // Leave browser/OS shortcuts (Ctrl/Cmd+wheel, Ctrl/Cmd +/-/0/F) to the browser.
+    // Comic zoom shortcuts; other Ctrl/Cmd combos are left to the browser.
     if (e.ctrlKey || e.metaKey) {
-      if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_' || e.key === '0') armBrowserZoomAnchor();
+      if (!state.loaded) return;
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(ZOOM_STEP); return; }
+      if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(-ZOOM_STEP); return; }
+      if (e.key === '0') { e.preventDefault(); setZoom(1); return; }
       return;
     }
     if (e.altKey) return;
@@ -737,10 +717,14 @@
     }
   });
 
-  // wheel: scroll mode scrolls natively; spread mode navigates by spread
+  // wheel: Ctrl/Cmd+wheel zooms the comic; otherwise scroll/spread navigation
   els.viewer.addEventListener('wheel', function (e) {
-    // Ctrl/Cmd+wheel is browser/OS zoom — never intercept it.
-    if (e.ctrlKey || e.metaKey) { armBrowserZoomAnchor(); return; }
+    if (e.ctrlKey || e.metaKey) {
+      if (!state.loaded) return;                   // nothing open — leave browser zoom alone
+      e.preventDefault();                          // don't let the browser zoom the UI
+      zoomBy(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+      return;
+    }
     if (!state.loaded) return;
     if (state.mode === 'scroll') return;           // let the view scroll natively
     if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
@@ -780,9 +764,9 @@
       resizeTick = false;
       if (!state.loaded) return;
       if (state.mode === 'scroll') {
-        var browserZoomAnchor = takeBrowserZoomAnchor();
+        var anchor = captureScrollAnchor();
         applyScrollWidths();
-        if (browserZoomAnchor !== undefined) restoreScrollAnchor(browserZoomAnchor);
+        restoreScrollAnchor(anchor);
       } else {
         renderSpread();
       }
