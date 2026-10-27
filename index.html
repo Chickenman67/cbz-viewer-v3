@@ -154,10 +154,10 @@
       <button type="button" id="modeBtn" title="Toggle between scroll and two-page spread">Mode: Scroll</button>
       <button type="button" id="dirBtn" title="Reading direction for two-page mode">Direction: RTL</button>
       <span class="sep"></span>
-      <button type="button" id="zoomOut" title="Zoom out (Ctrl+&minus;)">&#8722;</button>
+      <button type="button" id="zoomOut" title="Zoom comic out">&minus;</button>
       <span id="zoomLabel">100%</span>
-      <button type="button" id="zoomIn" title="Zoom in (Ctrl++)">+</button>
-      <button type="button" id="zoomReset" title="Reset zoom to 100% (Ctrl+0)">100%</button>
+      <button type="button" id="zoomIn" title="Zoom comic in">+</button>
+      <button type="button" id="zoomReset" title="Reset comic zoom to 100%">100%</button>
       <button type="button" id="spacingBtn" title="Toggle gutter between pages">Gaps: On</button>
       <span class="spacer"></span>
       <span id="pageLabel"></span>
@@ -218,9 +218,9 @@
     if (state.mode === 'spread') {
       return 'Press <kbd>F</kbd> fullscreen &middot; ' +
         (state.direction === 'ltr' ? '<kbd>&#8592;</kbd>/<kbd>a</kbd> prev &middot; <kbd>&#8594;</kbd>/<kbd>d</kbd> next' : '<kbd>&#8592;</kbd>/<kbd>a</kbd> next &middot; <kbd>&#8594;</kbd>/<kbd>d</kbd> prev') +
-        ' &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump &middot; <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>&minus;</kbd> zoom';
+        ' &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump';
     }
-    return 'Press <kbd>F</kbd> fullscreen &middot; mouse wheel or <kbd>&#8595;</kbd>/<kbd>PageDown</kbd>/<kbd>Space</kbd> scroll &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump &middot; <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>&minus;</kbd> zoom';
+    return 'Press <kbd>F</kbd> fullscreen &middot; mouse wheel or <kbd>&#8595;</kbd>/<kbd>PageDown</kbd>/<kbd>Space</kbd> scroll &middot; <kbd>Home</kbd>/<kbd>End</kbd> jump';
   }
   function updateHint() {
     els.hintbar.innerHTML = hintText() ||
@@ -651,13 +651,9 @@
 
   document.addEventListener('keydown', function (e) {
     if (isTyping(e)) return;
-    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); return; }
-    if (e.ctrlKey) {
-      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(ZOOM_STEP); return; }
-      if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(-ZOOM_STEP); return; }
-      if (e.key === '0') { e.preventDefault(); setZoom(1); return; }
-    }
+    // Leave browser/OS shortcuts (Ctrl/Cmd+wheel, Ctrl/Cmd +/-/0/F) to the browser.
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); return; }
     if (!state.loaded) return;
 
     if (state.mode === 'spread') {
@@ -678,7 +674,8 @@
 
   // wheel: scroll mode scrolls natively; spread mode navigates by spread
   els.viewer.addEventListener('wheel', function (e) {
-    if (e.ctrlKey) { e.preventDefault(); zoomBy(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP); return; }
+    // Ctrl/Cmd+wheel is browser/OS zoom — never intercept it.
+    if (e.ctrlKey || e.metaKey) return;
     if (!state.loaded) return;
     if (state.mode === 'scroll') return;           // let the view scroll natively
     if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {

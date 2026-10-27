@@ -27,7 +27,8 @@ from jsDelivr) for in-browser unzipping. No build step, no backend required
 - **Mouse wheel** scrolls (scroll mode) or turns the page (2-page mode).
 - **Keyboard** — `↓`/`PageDown`/`Space` and `↑`/`PageUp` scroll; `←`/`→`/`a`/`d`
   navigate spreads; `Home`/`End` jump; `F` toggles fullscreen.
-- **Zoom** — buttons, `Ctrl`+`+`/`-`, `Ctrl`+`0` reset, or `Ctrl`+wheel; persisted.
+- **Zoom** — toolbar buttons only; persisted. `Ctrl`/`Cmd`+`+`/`-`/`0` and
+  `Ctrl`/`Cmd`+wheel are left to the browser and do **not** change comic zoom.
 - **Fullscreen** — covers the whole viewport; the toolbar/controls auto-hide and
   reappear when you move the cursor to the top.
 - **ComicInfo.xml** — if the archive contains one, page order follows its
